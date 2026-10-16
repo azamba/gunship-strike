@@ -11,6 +11,8 @@ Tudo fica num único `index.html` (Three.js via CDN), sem build. Também dá par
 - Helicóptero no estilo Mi-24 com canhão 30mm e minigun no nariz, foguetes Hydra e mísseis Hellfire guiados.
 - **Atirador de porta:** visão de dentro da cabine, atrás de uma minigun M134, enquanto o helicóptero orbita sozinho o alvo.
 - **Multiplayer cooperativo P2P** (WebRTC/PeerJS): crie uma partida e passe o código. Cada jogador pode pilotar o próprio helicóptero ou embarcar como atirador no helicóptero de outro.
+- **Helicópteros inimigos:** chegam como reforço no meio das ondas, cercam você atirando com metralhadora, foguetes e mísseis ar-ar, e caem girando em chamas quando abatidos.
+- **Chefe a cada 5 ondas:** um gunship pesado e blindado com escolta, com barra de vida no topo da tela.
 - Ciclo dia, entardecer, noite e amanhecer: missões noturnas com visão térmica, holofote, janelas acesas e estrelas.
 - Gráficos: iluminação PBR, bloom, oclusão ambiente (GTAO), distorção de calor, partículas de fogo e fumaça, prédios destrutíveis.
 - Áudio sintetizado com WebAudio.

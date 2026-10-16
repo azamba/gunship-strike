@@ -62,6 +62,10 @@
   .online{margin-top:20px;padding-top:14px;border-top:1px solid rgba(159,239,127,.25)}
   #hSquad{font-size:12px;margin-top:8px;line-height:1.5;color:#bfe9ff}
   #hSquad b{font-size:12px;color:#fff}
+  #boss{position:fixed;top:14px;left:50%;transform:translateX(-50%);width:440px;max-width:70vw;text-align:center;pointer-events:none;
+    color:#ff8070;letter-spacing:4px;font-size:14px;text-shadow:0 0 4px #000}
+  #boss .bar{border-color:#ff8070;height:12px;margin-top:4px}
+  #boss .bar>i{background:linear-gradient(90deg,#ff3b30,#ff8a40)}
   body:not(.crew) .crewOnly, body.crew .soloGun{display:none!important}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
@@ -103,6 +107,7 @@
   <div style="margin-top:8px">FLARES [F] <b id="hFlares">0</b></div>
 </div>
 <div id="feed"></div>
+<div id="boss" class="hidden"><div id="bossName"></div><div class="bar"><i id="bossHp"></i></div></div>
 <div id="banner"></div>
 <div id="warn"></div>
 
@@ -1247,7 +1252,11 @@ const PROJ = {
   flak: { speed: 430, dmg: 2.2, life: 2.2, vis: 'tracer', color: 0xff6a3a, len: 6, w: 0.28, prox: 9 },
   rpg: { speed: 115, dmg: 10, splash: 6, life: 5, vis: 'rocket', trail: 'rpg' },
   shell: { speed: 230, dmg: 20, splash: 6, life: 4, vis: 'shell' },
-  sam: { speed: 40, maxSpeed: 128, accel: 90, dmg: 32, splash: 9, life: 12, vis: 'missile', trail: 'sam', homing: true, turn: 1.6, prox: 6 },
+  sam: { speed: 40, maxSpeed: 128, accel: 90, dmg: 32, splash: 9, life: 12, vis: 'missile', trail: 'sam', homing: true, guided: true, turn: 1.6, prox: 6 },
+  // armas dos helicópteros inimigos
+  hgun: { speed: 520, dmg: 1.0, life: 2, vis: 'tracer', color: 0xff5a40, len: 5, w: 0.22 },
+  hrocket: { speed: 170, dmg: 7, splash: 6, life: 5, vis: 'rocket', trail: 'rpg' },
+  aam: { speed: 60, maxSpeed: 150, accel: 120, dmg: 26, splash: 8, life: 9, vis: 'missile', trail: 'sam', homing: true, guided: true, turn: 2.1, prox: 6 },
 };
 const projectiles = [];
 const tracerMats = {};
@@ -1387,7 +1396,7 @@ function impact(p, hit) {
       if (hit.type === 'ground' && Math.random() < 0.3) addScorch(pt, rand(1.2, 2));
     } else fxExplosion(pt, p.kind === 'missile' ? 2.3 : 1.15);
   } else {
-    if (P.splash) { fxExplosion(pt, p.kind === 'sam' ? 1 : 0.6); hurtPlayerSplash(pt, P.splash, P.dmg); }
+    if (P.splash) { fxExplosion(pt, P.guided ? 1 : 0.6); hurtPlayerSplash(pt, P.splash, P.dmg); }
     else if (Math.random() < 0.4) fxImpact(pt, false);
   }
 }
@@ -1429,7 +1438,7 @@ function updateProjectiles(dt) {
               FIRE.emit(at.x, at.y, at.z, 0, 0, 0, 0.1, 6, 9, 1, 0.7, 0.3, 1);
               sfx.enemyShot(at, true);
             } else fxExplosion(at, 1, false);
-            if (tgt === player.pos && localActive()) hurtPlayer(P.dmg * (1 - d / P.prox) + (p.kind === 'sam' ? 15 : 0.5));
+            if (tgt === player.pos && localActive()) hurtPlayer(P.dmg * (1 - d / P.prox) + (P.guided ? 12 : 0.5));
             done = true;
           }
         }
@@ -1762,12 +1771,190 @@ const ETYPES = {
       e.muzzle = () => gp.localToWorld(V(pick([-0.95, -0.45, 0.45, 0.95]), 0, -2.7));
       return { tur, gp, radar };
     } },
+  heli: { hp: 220, radius: 6.5, yOff: 0, score: 400, name: 'HELICÓPTERO', armor: 0.6, threat: true, air: true, update: updHeli, build: buildEnemyHeli,
+    scale: 1, speed: 42, engage: 520, range: 230, aamChance: 0.35, color: 0x3c4436, color2: 0x2a3026,
+    hw: { gun: { burst: 12, interval: 0.07, spread: 0.028, cd: [3, 5], range: 520 }, rocket: { salvo: 4, interval: 0.15, spread: 0.03, cd: [7, 11] }, aam: { cd: [13, 19], range: 750 } } },
+  hboss: { hp: 1800, radius: 10, yOff: 0, score: 2500, name: 'GUNSHIP PESADO', armor: 0.3, threat: true, air: true, boss: true, update: updHeli, build: buildEnemyHeli,
+    scale: 1.55, speed: 30, engage: 650, range: 290, aamChance: 1, color: 0x2e2e33, color2: 0x1c1c20,
+    hw: { gun: { burst: 22, interval: 0.06, spread: 0.022, cd: [2.5, 4], range: 600 }, rocket: { salvo: 8, interval: 0.12, spread: 0.035, cd: [6, 9] }, aam: { cd: [9, 13], range: 850 } } },
 };
+// ---- helicópteros inimigos (unidades aéreas)
+function buildEnemyHeli(e) {
+  const c = e.cfg, tilt = new THREE.Group();
+  tilt.scale.setScalar(c.scale);
+  e.root.add(tilt);
+  const body = mat(c.color, 0.8, VEH), body2 = mat(c.color2, 0.8, VEH), dk = mat(0x1a1a18, 0.8, { roughness: 0.5, metalness: 0.5 });
+  const glass = mat(0x1a2a30, 0.8, { roughness: 0.05, metalness: 0.9 });
+  part(BOX, body, 2.2, 2.2, 6, 0, 0, 0, tilt);
+  part(BOX, body, 1.8, 1.7, 2.4, 0, -0.2, -4.0, tilt);
+  part(BOX, body2, 1.4, 1.2, 1.4, 0, -0.45, -5.6, tilt);
+  part(SPH, glass, 1.4, 1.1, 1.8, 0, 0.3, -5.1, tilt);
+  part(SPH, glass, 1.55, 1.3, 2.0, 0, 1.0, -3.3, tilt);
+  part(BOX, body2, 1.9, 1.0, 4.6, 0, 1.55, 0.3, tilt);
+  for (const s of [-1, 1]) {
+    part(CYL, dk, 0.8, 1.4, 0.8, 0.65 * s, 1.55, -2.2, tilt, false).rotation.x = Math.PI / 2;
+    part(BOX, body, 2.6, 0.18, 1.4, 2.2 * s, -0.35, -0.6, tilt);
+    part(CYL, dk, 0.8, 2.2, 0.8, 2.3 * s, -0.85, -0.6, tilt).rotation.x = Math.PI / 2;
+    part(CYL, M.white, 0.22, 1.6, 0.22, 3.3 * s, -0.75, -0.6, tilt, false).rotation.x = Math.PI / 2;
+  }
+  part(BOX, body, 0.8, 0.9, 8, 0, 0.5, 7.4, tilt);
+  part(BOX, body2, 0.25, 2.6, 1.5, 0, 1.6, 11.3, tilt);
+  part(BOX, body, 3.0, 0.12, 0.9, 0, 0.45, 10.4, tilt);
+  part(SPH, dk, 0.75, 0.6, 0.75, 0, -1.25, -4.9, tilt);
+  part(CYL, M.black, 0.14, 1.6, 0.14, 0, -1.25, -5.8, tilt, false).rotation.x = Math.PI / 2;
+  part(BOX, LAMP, 0.15, 0.15, 0.15, 0, 2.95, 11.4, tilt, false); // luz de navegação
+  part(CYL, dk, 0.4, 0.7, 0.4, 0, 2.3, 0.3, tilt);
+  const rotor = new THREE.Group(); rotor.position.set(0, 2.65, 0.3); tilt.add(rotor);
+  for (let k = 0; k < 5; k++) { const bg = new THREE.Group(); bg.rotation.y = k / 5 * Math.PI * 2; rotor.add(bg); part(BOX, dk, 0.55, 0.07, 7.4, 0, 0, -3.9, bg); }
+  const disk = new THREE.Mesh(new THREE.CircleGeometry(7.7, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x111111, transparent: true, opacity: 0.1, depthWrite: false }));
+  disk.userData.skipVision = true; rotor.add(disk);
+  const tr = new THREE.Group(); tr.position.set(-0.3, 1.8, 11.6); tilt.add(tr);
+  part(BOX, dk, 0.08, 2.6, 0.25, 0, 0, 0, tr, false); part(BOX, dk, 0.08, 0.25, 2.6, 0, 0, 0, tr, false);
+  e.muzzle = () => tilt.localToWorld(V(0, -1.25, -6.7));
+  return { tilt, rotor, tailRotor: tr };
+}
+function heliRotorFx(e, dt) {
+  const P = e.parts;
+  P.rotor.rotation.y += dt * 24; P.tailRotor.rotation.x += dt * 38;
+  e.sndT = (e.sndT || 0) - dt;
+  if (e.sndT <= 0) { // "tuc-tuc" do rotor, mais alto quando perto
+    e.sndT = 0.1;
+    const d = e.pos.distanceTo(camera.position);
+    if (d < 600) sfx.noiseHit(0.08, 'lowpass', 170, 0.4 / (1 + d / 50));
+  }
+}
+function updHeli(e, dt) {
+  const c = e.cfg, s = e.st, T = e.tgt, P = e.parts;
+  e.vel = e.vel || V();
+  if (s.altOff === undefined) { s.altOff = rand(5, 30); s.side = Math.random() < 0.5 ? 1 : -1; s.sideT = rand(4, 8); }
+  const want = V();
+  let tAlt = heightAt(e.pos.x, e.pos.z) + 70, face = null;
+  if (T && T.alive) {
+    const tx = T.pos.x - e.pos.x, tz = T.pos.z - e.pos.z, dH = Math.hypot(tx, tz) || 1, nx = tx / dH, nz = tz / dH;
+    if (!s.fled && e.hp < c.hp * 0.25 && !c.boss) { s.flee = 6; s.fled = true; } // foge uma vez quando muito avariado
+    if (s.flee > 0) { s.flee -= dt; want.set(-nx, 0, -nz).multiplyScalar(c.speed); }
+    else if (dH > c.engage) want.set(nx, 0, nz).multiplyScalar(c.speed);
+    else { // metralha em volta do alvo, alternando o lado
+      s.sideT -= dt; if (s.sideT <= 0) { s.side *= -1; s.sideT = rand(4, 8); }
+      const radial = clamp((dH - c.range) / 80, -1, 1);
+      want.set(-nz * s.side * 0.8 + nx * radial, 0, nx * s.side * 0.8 + nz * radial).multiplyScalar(c.speed * 0.8);
+      face = T.pos;
+    }
+    tAlt = Math.max(T.pos.y + s.altOff, tAlt - 40);
+  } else want.set(-Math.sin(e.yaw), 0, -Math.cos(e.yaw)).multiplyScalar(c.speed * 0.5);
+  for (const o of enemies) { // separação entre aeronaves
+    if (o === e || !o.alive || !o.cfg.air) continue;
+    const dx = e.pos.x - o.pos.x, dz = e.pos.z - o.pos.z, d = Math.hypot(dx, dz);
+    if (d < 40 && d > 0.1) { want.x += dx / d * 25; want.z += dz / d * 25; }
+  }
+  if (Math.hypot(e.pos.x, e.pos.z) > 900) { want.x -= e.pos.x * 0.05; want.z -= e.pos.z * 0.05; }
+  const k = 1 - Math.exp(-dt * 0.9);
+  const ax = (want.x - e.vel.x) * k, az = (want.z - e.vel.z) * k;
+  e.vel.x += ax; e.vel.z += az;
+  tAlt = Math.max(tAlt, heightAt(e.pos.x, e.pos.z) + 25, heightAt(e.pos.x + e.vel.x * 2, e.pos.z + e.vel.z * 2) + 25);
+  e.vel.y = clamp((tAlt - e.pos.y) * 0.6, -12, 14);
+  e.pos.addScaledVector(e.vel, dt);
+  e.pos.y = Math.max(e.pos.y, heightAt(e.pos.x, e.pos.z) + 15);
+  const fx = face ? face.x - e.pos.x : e.vel.x, fz = face ? face.z - e.pos.z : e.vel.z;
+  if (Math.hypot(fx, fz) > 0.5) e.yaw += angDiff(e.yaw, Math.atan2(-fx, -fz)) * Math.min(1, dt * 1.6);
+  e.root.rotation.y = e.yaw;
+  const sy = Math.sin(e.yaw), cy = Math.cos(e.yaw);
+  const vf = -sy * e.vel.x - cy * e.vel.z, vr = cy * e.vel.x - sy * e.vel.z;
+  const kt = 1 - Math.exp(-dt * 3);
+  P.tilt.rotation.x = lerp(P.tilt.rotation.x, -vf / 50 * 0.3, kt);
+  P.tilt.rotation.z = lerp(P.tilt.rotation.z, -vr / 50 * 0.4, kt);
+  e.root.updateMatrixWorld(true);
+  heliRotorFx(e, dt);
+  heliWeapons(e, dt, T);
+}
+function heliWeapons(e, dt, T) {
+  const hw = e.cfg.hw, s = e.st;
+  if (s.gunCd === undefined) { s.gunCd = rand(2, 4); s.rkCd = rand(4, 8); s.aamCd = rand(6, 12); s.burst = 0; s.salvo = 0; }
+  s.gunCd -= dt; s.rkCd -= dt; s.aamCd -= dt;
+  if (!T || !T.alive) return;
+  const from = e.muzzle(), d = from.distanceTo(T.pos);
+  _v.copy(T.pos).sub(e.pos);
+  const facing = Math.abs(angDiff(e.yaw, Math.atan2(-_v.x, -_v.z))) < 0.35;
+  if (s.burst > 0) { // rajada de metralhadora
+    s.burstT -= dt;
+    if (s.burstT <= 0) {
+      s.burst--; s.burstT = hw.gun.interval;
+      _v.copy(T.pos).addScaledVector(T.vel, d / PROJ.hgun.speed * 0.85);
+      enemyFire('hgun', from, spreadDir(from, _v, hw.gun.spread));
+      sfx.enemyShot(from, true);
+      FIRE.emit(from.x, from.y, from.z, 0, 0, 0, 0.05, 2.5, 3.5, 1, 0.8, 0.4, 1);
+    }
+  } else if (s.gunCd <= 0 && facing && d < hw.gun.range) {
+    s.gunCd = rand(...hw.gun.cd);
+    if (hasLOS(from, T.pos)) { s.burst = hw.gun.burst; s.burstT = 0; }
+  }
+  if (s.salvo > 0) { // salva de foguetes
+    s.salvoT -= dt;
+    if (s.salvoT <= 0) {
+      s.salvo--; s.salvoT = hw.rocket.interval; s.pod = -(s.pod || 1);
+      const m = e.parts.tilt.localToWorld(V(2.3 * s.pod, -0.85, -1.9));
+      _v.copy(T.pos).addScaledVector(T.vel, d / PROJ.hrocket.speed * 0.8);
+      enemyFire('hrocket', m, spreadDir(m, _v, hw.rocket.spread));
+      sfx.enemyShot(m, true);
+    }
+  } else if (s.rkCd <= 0 && facing && d > 120 && d < 480) {
+    s.rkCd = rand(...hw.rocket.cd);
+    if (hasLOS(from, T.pos)) { s.salvo = hw.rocket.salvo; s.salvoT = 0; }
+  }
+  if (s.aamCd <= 0 && d < hw.aam.range) { // míssil ar-ar guiado (flares desviam)
+    s.aamCd = rand(...hw.aam.cd);
+    if (Math.random() < e.cfg.aamChance && hasLOS(from, T.pos)) {
+      const m = e.parts.tilt.localToWorld(V(3.3 * (Math.random() < 0.5 ? -1 : 1), -0.75, -1.5));
+      enemyFire('aam', m, _v.copy(T.pos).sub(m).normalize().clone(), T);
+      sfx.missile();
+    }
+  }
+}
+// queda de helicóptero abatido: gira, pega fogo e explode no chão
+function updCrash(e, dt) {
+  const c = e.crash;
+  c.vel.y -= 14 * dt;
+  c.vel.x *= Math.exp(-0.3 * dt); c.vel.z *= Math.exp(-0.3 * dt);
+  e.pos.addScaledVector(c.vel, dt);
+  e.yaw += c.spin * dt; e.root.rotation.y = e.yaw;
+  e.parts.tilt.rotation.z += c.spin * 0.08 * dt;
+  e.parts.tilt.rotation.x = lerp(e.parts.tilt.rotation.x, 0.5, dt);
+  e.parts.rotor.rotation.y += dt * 12;
+  e.root.updateMatrixWorld(true);
+  const p = e.parts.tilt.localToWorld(V(0, 1.4, 1));
+  for (let i = 0; i < 2; i++) {
+    FIRE.emit(p.x, p.y, p.z, rand(-2, 2), rand(0, 3), rand(-2, 2), rand(0.3, 0.6), 3 * e.cfg.scale, 1, 1, 0.55, 0.15, 0.95, 0.5, -2, 0.7, 0.15, 0.05);
+    const g = rand(0.08, 0.16);
+    SMOKE.emit(p.x, p.y, p.z, c.vel.x * 0.2 + rand(-1, 1), rand(1, 3), c.vel.z * 0.2 + rand(-1, 1), rand(2.5, 4), 2.5 * e.cfg.scale, 10 * e.cfg.scale, g, g, g, 0.7, 0.6, -0.5);
+  }
+  const gh = heightAt(e.pos.x, e.pos.z);
+  if (e.pos.y <= gh + 1.5) {
+    e.pos.y = gh + 1; e.crash = null;
+    e.parts.tilt.rotation.set(0.2, 0, rand(0.6, 1.2));
+    fxExplosion(e.pos.clone().add(V(0, 2, 0)), 2.4 * e.cfg.scale);
+    spawnDebris(e.pos.clone().add(V(0, 2, 0)), 10, M.burnt, 30, true);
+    setMaterial(e.root, M.burnt);
+    addBurner(e.pos.clone().add(V(0, 1, 0)), 1.2 * e.cfg.scale, rand(25, 40));
+  }
+}
 // convidado: suaviza o movimento até a última posição recebida do anfitrião e anima peças
 function remoteEnemyVisual(e, dt) {
   const n = e.net;
-  if (!n) return;
+  if (!n) { if (e.cfg.air) heliRotorFx(e, dt); return; }
   const k = 1 - Math.exp(-dt * 8);
+  if (e.cfg.air) { // aeronave: posição 3D, inclinação e vida (para a barra do chefe)
+    const px = e.pos.x, py = e.pos.y, pz = e.pos.z;
+    if (Math.hypot(n.x - e.pos.x, n.y - e.pos.y, n.z - e.pos.z) > 60) e.pos.set(n.x, n.y, n.z); // muito atrasado: salta
+    else { e.pos.x += (n.x - e.pos.x) * k; e.pos.z += (n.z - e.pos.z) * k; e.pos.y += (n.y - e.pos.y) * k; }
+    if (dt > 0) e.vel.lerp(_v.set((e.pos.x - px) / dt, (e.pos.y - py) / dt, (e.pos.z - pz) / dt), 0.2);
+    e.yaw += angDiff(e.yaw, n.yaw) * k; e.root.rotation.y = e.yaw;
+    e.parts.tilt.rotation.x += (n.ty - e.parts.tilt.rotation.x) * k;
+    e.parts.tilt.rotation.z += (n.gp - e.parts.tilt.rotation.z) * k;
+    e.hpFrac = n.hp;
+    e.root.updateMatrixWorld(true);
+    heliRotorFx(e, dt);
+    return;
+  }
   const dx = n.x - e.pos.x, dz = n.z - e.pos.z, moving = Math.hypot(dx, dz) > 0.05;
   if (Math.hypot(dx, dz) > 40) { e.pos.x = n.x; e.pos.z = n.z; } else { e.pos.x += dx * k; e.pos.z += dz * k; }
   e.pos.y = heightAt(e.pos.x, e.pos.z);
@@ -1792,6 +1979,7 @@ class Enemy {
     this.root = new THREE.Group();
     this.pos = this.root.position;
     this.pos.set(x, heightAt(x, z), z);
+    if (this.cfg.air) { this.pos.y += this.alt ?? 90; this.vel = V(); }
     this.yaw = this.yaw ?? rand(0, 6.28); this.root.rotation.y = this.yaw;
     this.id = this.id ?? NET.nextEid++;
     this.remote = NET.role === 'guest'; // no convidado o inimigo é uma cópia controlada pelo anfitrião
@@ -1804,7 +1992,7 @@ class Enemy {
     this.updateCenter();
     enemies.push(this);
     enemyById.set(this.id, this);
-    if (NET.role === 'host') NET.ev.push(['sp', this.id, type, r1(x), r1(z), r2(this.yaw), this.rpg ? 1 : 0, this.tech ? 1 : 0]);
+    if (NET.role === 'host') NET.ev.push(['sp', ...enemySpawnEntry(this)]);
   }
   updateCenter() { this.center.copy(this.pos); this.center.y += this.yOff; this.sphere.center.copy(this.center); }
   damage(n) { if (!this.alive) return; this.hp -= n; if (this.hp <= 0) this.die(); }
@@ -1823,6 +2011,14 @@ class Enemy {
       for (let i = 0; i < 4; i++) SMOKE.emit(this.pos.x, this.pos.y + 1, this.pos.z, rand(-2, 2), rand(1, 4), rand(-2, 2), 1.2, 1.5, 4, 0.6, 0.5, 0.38, 0.6, 2, 2);
       return;
     }
+    if (this.cfg.air) { // começa a queda; explode ao tocar o chão
+      const v = (this.vel || V()).clone();
+      v.y = Math.min(v.y, 0) - 3; // nunca "sobe" ao ser abatido (no convidado a velocidade é estimada)
+      const h = Math.hypot(v.x, v.z); if (h > 45) { v.x *= 45 / h; v.z *= 45 / h; }
+      this.crash = { vel: v, spin: rand(2.5, 4) * (Math.random() < 0.5 ? -1 : 1) };
+      fxExplosion(this.center, 0.9, false);
+      return;
+    }
     const big = this.type === 'tank' ? 1.8 : this.type === 'truck' ? 1.2 : 1.5;
     fxExplosion(this.center, big);
     spawnDebris(this.center, 6, M.burnt, 26, true);
@@ -1838,6 +2034,7 @@ class Enemy {
   }
   update(dt) {
     if (!this.alive) {
+      if (this.crash) { updCrash(this, dt); this.updateCenter(); return; }
       this.deadT += dt;
       if (this.deadT > (this.type === 'soldier' ? 15 : 90)) {
         scene.remove(this.root);
@@ -1936,18 +2133,33 @@ function spawnWave(n) {
     const h = vi(), c = spawnPoint(villages[h], villages[h].r + 40, villages[h].r + 140);
     if (c) new Enemy('sam', c[0], c[1], { home: h });
   }
+  // helicópteros chegam como reforço no meio da onda; a cada 5 ondas, chefe com escolta
+  state.reinf = [];
+  const nh = n >= 2 ? Math.min(5, Math.floor(n / 2)) : 0;
+  for (let i = 0; i < nh; i++) state.reinf.push(rand(15, 45) + i * 8);
+  if (n % 5 === 0) { spawnAir('hboss'); spawnAir('heli'); spawnAir('heli'); }
   if (NET.role === 'host') NET.ev.push(['wave', n, state.tod]);
   onWaveStart(n);
+}
+function spawnAir(type) {
+  const a = rand(0, Math.PI * 2), x = Math.cos(a) * 860, z = Math.sin(a) * 860;
+  return new Enemy(type, x, z, { yaw: Math.atan2(x, z), alt: rand(80, 110) });
 }
 function onWaveStart(n) {
   state.wave = n; state.waveActive = true;
   player.rockets = 38; player.missiles = 8; player.flares = 10;
-  showBanner(`ONDA ${n}`, PRESETS[state.tod].night > 0.5 ? 'MISSÃO NOTURNA — USE A VISÃO TÉRMICA [T] E O HOLOFOTE [L]' : `ELIMINE TODOS OS ALVOS · ${PRESETS[state.tod].name}`);
+  if (n % 5 === 0) showBanner(`ONDA ${n} — CHEFE`, 'GUNSHIP PESADO COM ESCOLTA SE APROXIMANDO · USE FLARES [F]');
+  else showBanner(`ONDA ${n}`, PRESETS[state.tod].night > 0.5 ? 'MISSÃO NOTURNA — USE A VISÃO TÉRMICA [T] E O HOLOFOTE [L]' : `ELIMINE TODOS OS ALVOS · ${PRESETS[state.tod].name}`);
 }
 function checkWave(dt) {
   if (state.over || NET.role === 'guest') return; // no multiplayer, só o anfitrião controla as ondas
   if (state.waveActive) {
-    if (!enemies.some(e => e.alive)) {
+    const reinf = state.reinf || [];
+    for (let i = reinf.length - 1; i >= 0; i--) {
+      reinf[i] -= dt;
+      if (reinf[i] <= 0) { reinf.splice(i, 1); spawnAir('heli'); teamFeed('⚠ HELICÓPTERO INIMIGO SE APROXIMANDO'); sfx.beep(700); }
+    }
+    if (!enemies.some(e => e.alive) && !reinf.length) {
       state.waveActive = false; state.waveTimer = 6;
       const bonus = 500 * state.wave, tod = state.wave % PRESETS.length;
       state.score += bonus;
@@ -2022,7 +2234,7 @@ function dropFlares() {
   }
   sfx.flare();
   for (const p of projectiles) {
-    if (p.kind === 'sam' && p.target === player && p.pos.distanceTo(player.pos) < 650 && Math.random() < 0.85) p.target = pick(flares.slice(-6));
+    if (p.P.guided && p.target === player && p.pos.distanceTo(player.pos) < 650 && Math.random() < 0.85) p.target = pick(flares.slice(-6));
   }
 }
 function spawnFlareBurst(x, y, z, vx, vy, vz) {
@@ -2574,7 +2786,7 @@ function drawHUD(dt) {
   }
   // mísseis inimigos
   for (const p of projectiles) {
-    if (p.kind !== 'sam') continue;
+    if (!p.P.guided) continue;
     const s = toScreen(p.pos, W, H);
     if (s.z < 1 && Math.abs(s.nx) < 1 && Math.abs(s.ny) < 1) {
       hc.strokeStyle = '#ff2020'; hc.lineWidth = 2;
@@ -2654,10 +2866,11 @@ function drawMinimap() {
     if (!e.alive) continue;
     const [x, y] = tr(e.pos.x, e.pos.z);
     mc.fillStyle = e.cfg.threat ? '#ff3b30' : '#ffb340';
+    if (e.cfg.air) { const r = e.cfg.boss ? 7 : 5; mc.beginPath(); mc.moveTo(x, y - r); mc.lineTo(x + r, y); mc.lineTo(x, y + r); mc.lineTo(x - r, y); mc.closePath(); mc.fill(); continue; }
     const r = e.type === 'soldier' ? 1.6 : 3;
     mc.beginPath(); mc.arc(x, y, r, 0, 6.28); mc.fill();
   }
-  for (const p of projectiles) if (p.kind === 'sam') { const [x, y] = tr(p.pos.x, p.pos.z); mc.fillStyle = '#fff'; mc.fillRect(x - 2, y - 2, 4, 4); }
+  for (const p of projectiles) if (p.P.guided) { const [x, y] = tr(p.pos.x, p.pos.z); mc.fillStyle = '#fff'; mc.fillRect(x - 2, y - 2, 4, 4); }
   // borda da área
   mc.strokeStyle = 'rgba(255,80,60,.5)'; mc.lineWidth = 1;
   mc.beginPath();
@@ -2681,6 +2894,12 @@ const H = { wave: $('hWave'), score: $('hScore'), targets: $('hTargets'), hp: $(
   a1: $('a1'), a2: $('a2'), heat: $('hHeat'), mgHeat: $('hMgHeat'), mgHeat2: $('hMgHeat2'), orbit: $('hOrbit'), mode: $('hMode'), squad: $('hSquad'), tod: $('hTod'), flares: $('hFlares'), warn: $('warn'), vig: $('vig'), banner: $('banner'), vision: $('hVision') };
 function updateDomHUD(dt) {
   H.wave.textContent = state.wave;
+  const boss = enemies.find(e => e.alive && e.cfg.boss);
+  $('boss').classList.toggle('hidden', !boss);
+  if (boss) {
+    $('bossName').textContent = 'CHEFE · ' + boss.cfg.name;
+    $('bossHp').style.width = clamp(NET.role === 'guest' ? boss.hpFrac ?? 1 : boss.hp / boss.cfg.hp, 0, 1) * 100 + '%';
+  }
   H.score.textContent = state.score;
   H.targets.textContent = enemies.filter(e => e.alive).length;
   const veh = viewVeh(), crew = state.mode === 'crew';
@@ -2706,7 +2925,7 @@ function updateDomHUD(dt) {
   H.tod.textContent = PRESETS[state.tod].name;
   H.heat.style.background = player.overheated ? '#ff4a3a' : '#ffc040';
   // avisos
-  state.missileIncoming = projectiles.some(p => p.kind === 'sam' && p.target === veh);
+  state.missileIncoming = projectiles.some(p => p.P.guided && p.target === veh);
   if (NET.role === 'guest') state.samLock = enemies.some(e => e.alive && e.net && e.net.lk && e.net.lk === veh.id);
   let warn = '';
   if (state.missileIncoming) warn = '⚠ MÍSSIL SE APROXIMANDO — SOLTE FLARES [F]';
@@ -2938,7 +3157,7 @@ function spawnEnemyShot(ev) {
   const from = V(fx, fy, fz);
   const target = !tid ? null : tid === NET.id ? player : NET.remotes.get(tid) || null;
   spawnProj(kind, 'enemy', from, V(dx, dy, dz), target ? { target } : {});
-  if (kind === 'sam') {
+  if (PROJ[kind].guided) {
     sfx.missile();
     for (let k = 0; k < 14; k++) SMOKE.emit(fx, fy, fz, rand(-6, 6), rand(0, 4), rand(-6, 6), rand(2, 4), 3, 10, 0.8, 0.8, 0.78, 0.6, 1.2, -0.5);
   } else {
@@ -2946,24 +3165,25 @@ function spawnEnemyShot(ev) {
     FIRE.emit(fx, fy, fz, 0, 0, 0, 0.06, 2.5, 3.5, 1, 0.8, 0.4, 1);
   }
 }
-function enemySpawnEntry(e) { return [e.id, e.type, r1(e.pos.x), r1(e.pos.z), r2(e.yaw), e.rpg ? 1 : 0, e.tech ? 1 : 0]; }
-function spawnFromEntry([id, type, x, z, yaw, rpg, tech]) {
+function enemySpawnEntry(e) { return [e.id, e.type, r1(e.pos.x), r1(e.pos.z), r2(e.yaw), e.rpg ? 1 : 0, e.tech ? 1 : 0, e.cfg.air ? r1(e.pos.y - heightAt(e.pos.x, e.pos.z)) : 0]; }
+function spawnFromEntry([id, type, x, z, yaw, rpg, tech, alt]) {
   if (enemyById.has(id) || !ETYPES[type]) return;
-  new Enemy(type, x, z, { id, yaw, rpg: !!rpg, tech: !!tech, home: 0 });
+  new Enemy(type, x, z, { id, yaw, rpg: !!rpg, tech: !!tech, home: 0, alt });
 }
 function enemySnapshot() {
   const out = [];
   for (const e of enemies) {
     if (!e.alive) continue;
     const P = e.parts;
-    out.push([e.id, r1(e.pos.x), r1(e.pos.z), r2(e.yaw), P.tur ? r2(P.tur.rotation.y) : 0, P.gp ? r2(P.gp.rotation.x) : 0, e.lockId || 0]);
+    if (e.cfg.air) out.push([e.id, r1(e.pos.x), r1(e.pos.z), r2(e.yaw), r2(P.tilt.rotation.x), r2(P.tilt.rotation.z), 0, r1(e.pos.y), r2(e.hp / e.cfg.hp)]);
+    else out.push([e.id, r1(e.pos.x), r1(e.pos.z), r2(e.yaw), P.tur ? r2(P.tur.rotation.y) : 0, P.gp ? r2(P.gp.rotation.x) : 0, e.lockId || 0]);
   }
   return out;
 }
 function applyEnemySnap(list) {
-  for (const [id, x, z, yaw, ty, gp, lk] of list) {
+  for (const [id, x, z, yaw, ty, gp, lk, y, hp] of list) {
     const e = enemyById.get(id);
-    if (e && e.alive) e.net = { x, z, yaw, ty, gp, lk };
+    if (e && e.alive) e.net = { x, z, yaw, ty, gp, lk, y, hp };
   }
 }
 // eventos do anfitrião aplicados nos convidados
@@ -3189,7 +3409,7 @@ function tick(dt) {
     netUpdate(dt);
 }
 frame();
-window.__game = { NET, boardCrew, leaveCrew, toggleCrew, buildings, enemyById, camera, setMode, setTimeOfDay, keys, state, player, enemies, startGame, toggleThermal, input, selectWeapon, step: (n, dt = 1 / 60) => { for (let i = 0; i < n; i++) tick(dt); } };
+window.__game = { spawnAir, spawnWave, NET, boardCrew, leaveCrew, toggleCrew, buildings, enemyById, camera, setMode, setTimeOfDay, keys, state, player, enemies, startGame, toggleThermal, input, selectWeapon, step: (n, dt = 1 / 60) => { for (let i = 0; i < n; i++) tick(dt); } };
 </script>
 </body>
 </html>
