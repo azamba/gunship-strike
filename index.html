@@ -96,9 +96,14 @@
   .hint{font-size:13px;color:#9a9}
   .touchHint{display:none;margin-top:14px;font-size:13px;color:#cfe}
   body.touch .touchHint{display:block}
-  .acDesc{font-size:13px;color:#cfe;margin:6px 0 0 62px;min-height:18px}
+  #qrBox{float:right;margin:0 0 10px 18px;text-align:center;font-size:11px;letter-spacing:1px;color:#9fef7f;max-width:124px}
+  #qr{width:112px;height:112px;background:#fff;padding:6px;margin-bottom:5px}
+  #qr svg{display:block;width:100%;height:100%}
+  body.touch #qrBox{display:none!important}
+  @media (max-width:640px){ #qrBox{display:none!important} }
+  .acDesc{font-size:13px;color:#cfe;margin:6px 0 0 94px;min-height:18px}
   #acRow button.opt{display:inline-block!important}
-  .cfgRow .lbl{width:52px;color:#9fef7f;font-size:14px;letter-spacing:2px}
+  .cfgRow .lbl{width:84px;color:#9fef7f;font-size:14px;letter-spacing:2px}
   .cfgRow button.opt{font-size:13px;padding:7px 12px;letter-spacing:2px}
   .cfgRow button.opt.on{background:#9fef7f;color:#0b130b}
   body.online .cfgRow button.opt:not(.on){display:none}
@@ -121,6 +126,7 @@
   body:not(.crew) .crewOnly, body.crew .soloGun{display:none!important}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
 <script type="importmap">
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
@@ -167,6 +173,7 @@
 
 <div id="menu" class="overlay">
   <div class="box">
+    <div id="qrBox" class="hidden"><div id="qr"></div><div id="qrTxt">JOGUE NO CELULAR</div></div>
     <h1>GUNSHIP STRIKE</h1>
     <div class="sub" id="menuSub">HELICÓPTERO DE ATAQUE · OPERAÇÃO TEMPESTADE DE AREIA</div>
     <p id="menuDesc">Elimine todos os alvos terrestres de cada onda: infantaria, veículos, tanques, baterias antiaéreas e lançadores SAM. Eles revidam.</p>
@@ -4863,6 +4870,20 @@ $('leaveBtn').addEventListener('click', () => { location.href = MENU_URL; });
 addEventListener('beforeunload', () => { try { NET.peer?.destroy(); } catch (_) {} });
 if (NET.role !== 'solo') $('pauseMp').textContent = ' — a partida online continua rodando';
 netInit();
+// QR code do link do jogo (no lobby online, o link já entra na partida)
+const PUBLIC_URL = 'https://azamba.github.io/gunship-strike/';
+function drawQR() {
+  if (!window.qrcode) return;
+  const web = /^https?:$/.test(location.protocol) && !/^(localhost|127\.|0\.0\.0\.0)/.test(location.hostname);
+  const base = web ? location.origin + location.pathname : PUBLIC_URL;
+  const url = NET.role !== 'solo' ? base + '?join=' + NET.code : base + (GAME.map !== 'deserto' || GAME.mode !== 'ondas' ? `?map=${GAME.map}&mode=${GAME.mode}` : '');
+  const q = qrcode(0, 'M'); q.addData(url); q.make();
+  $('qr').innerHTML = q.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
+  $('qrTxt').textContent = NET.role !== 'solo' ? 'ENTRE PELO CELULAR' : 'JOGUE NO CELULAR';
+  $('qrBox').title = url;
+  $('qrBox').classList.remove('hidden');
+}
+drawQR();
 
 // ================================================================ loop
 const clock = new THREE.Clock();
